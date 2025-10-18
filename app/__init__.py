@@ -5,6 +5,7 @@ from app.common.types import ApiResponse
 from http import HTTPStatus
 from supabase import create_client, Client
 from openai import AsyncOpenAI
+import redis.asyncio as redis
 import logging
 
 # Removes "ERROR:root:" from the start of each error log
@@ -30,6 +31,17 @@ def create_app(config_class=Config):
     app.supabase = create_client(
         app.config['SUPABASE_URL'],
         app.config['SUPABASE_KEY']
+    )
+
+    # Initialise Redis client
+    app.redis = redis.Redis(
+        host=app.config['REDIS_HOST'],
+        port=app.config['REDIS_PORT'],
+        db=app.config['REDIS_DB'],
+        password=app.config['REDIS_PASSWORD'],
+        ssl=app.config['REDIS_SSL'],
+        ssl_cert_reqs=None,  # Add this for Upstash
+        decode_responses=True
     )
 
     # # Initialise OpenAI client once at startup
