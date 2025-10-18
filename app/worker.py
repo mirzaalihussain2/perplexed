@@ -24,6 +24,8 @@ async def get_redis_client():
         password=Config.REDIS_PASSWORD,
         ssl=Config.REDIS_SSL,
         ssl_cert_reqs=None,
+        socket_connect_timeout=10,
+        socket_timeout=10,
         decode_responses=True
     )
 
@@ -102,22 +104,116 @@ async def split_video(ctx, job_id: str, chunk_duration: int = 20):
             os.rmdir(temp_chunks_dir)
 
 async def process_clip(ctx, job_id: str, idx: int):
-    logging.info(f"[process_clip] Processing job {job_id}, clip {idx}")
+    """
+    Process a single clip: transcribe → check Perplexity → optionally create replacement.
+    """
+    redis_client = None
+    temp_clip = None
+    temp_audio = None
+    temp_image = None
+    temp_replacement = None
     
-    redis_client = await get_redis_client()
+    try:
+        logging.info(f"[process_clip] Starting job {job_id}, clip {idx}")
+        
+        redis_client = await get_redis_client()
+        supabase = get_supabase_client()
+        
+        # Download clip from Supabase
+        clip_remote_path = f"videos/{job_id}/chunks/{idx}.mp4"
+        temp_clip = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
+        
+        logging.info(f"[process_clip] Downloading clip {idx}")
+        clip_data = supabase.storage.from_(Config.SUPABASE_BUCKET).download(clip_remote_path)
+        with open(temp_clip, 'wb') as f:
+            f.write(clip_data)
+        
+        # Step 1: Transcribe audio (MOCKED)
+        logging.info(f"[process_clip] Transcribing clip {idx}")
+        transcript = await mock_transcribe(temp_clip)
+        logging.info(f"[process_clip] Transcript: {transcript[:100]}...")
+        
+        # Step 2: Check Perplexity for references (MOCKED)
+        logging.info(f"[process_clip] Checking Perplexity for references")
+        perplexity_result = await mock_perplexity_check(transcript)
+        
+        if perplexity_result and perplexity_result.get('has_reference'):
+            image_url = perplexity_result.get('image_url')
+            logging.info(f"[process_clip] Reference found with image: {image_url}")
+            
+            # Download image
+            temp_image = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False).name
+            await download_video_from_url(image_url, temp_image)
+            
+            # Extract audio from clip
+            temp_audio = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
+            from app.common.video import extract_audio, create_video_from_image_and_audio
+            extract_audio(temp_clip, temp_audio)
+            
+            # Create replacement video (image + audio)
+            temp_replacement = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
+            create_video_from_image_and_audio(temp_image, temp_audio, temp_replacement)
+            
+            # Upload replacement to Supabase
+            replacement_remote_path = f"videos/{job_id}/replacements/{idx}.mp4"
+            upload_to_supabase(supabase, Config.SUPABASE_BUCKET, temp_replacement, replacement_remote_path)
+            logging.info(f"[process_clip] Uploaded replacement for clip {idx}")
+            
+            await redis_client.set(f"job:{job_id}:clip:{idx}:has_replacement", "true")
+        else:
+            logging.info(f"[process_clip] No reference found for clip {idx}, using original")
+            await redis_client.set(f"job:{job_id}:clip:{idx}:has_replacement", "false")
+        
+        # Atomic increment and check if all done
+        done = await redis_client.incr(f"job:{job_id}:done")
+        total = int(await redis_client.get(f"job:{job_id}:total") or 0)
+        
+        logging.info(f"[process_clip] Job {job_id}: {done}/{total} clips done")
+        
+        if done == total:
+            await ctx['pool'].enqueue_job('stitch_video', job_id)
+            logging.info(f"[process_clip] All clips done, enqueuing stitch_video")
     
-    await asyncio.sleep(1)
+    except Exception as e:
+        logging.error(f"[process_clip] Job {job_id}, clip {idx} failed: {e}")
+        raise
     
-    done = await redis_client.incr(f"job:{job_id}:done")
-    total = int(await redis_client.get(f"job:{job_id}:total") or 0)
+    finally:
+        if redis_client:
+            await redis_client.close()
+        
+        for temp_file in [temp_clip, temp_audio, temp_image, temp_replacement]:
+            if temp_file and os.path.exists(temp_file):
+                os.remove(temp_file)
+
+async def mock_transcribe(video_path: str) -> str:
+    """
+    Mock transcription function.
+    Replace with Deepgram or ElevenLabs API call.
+    """
+    await asyncio.sleep(0.5)
+    return "This is a mock transcript mentioning Steve Jobs and the iPhone launch in 2007."
+
+async def mock_perplexity_check(transcript: str) -> dict:
+    """
+    Mock Perplexity API call.
+    Replace with actual Perplexity API integration.
     
-    logging.info(f"[process_clip] Job {job_id}: {done}/{total} clips done")
+    Returns:
+        dict with 'has_reference' (bool) and 'image_url' (str) if reference found
+    """
+    await asyncio.sleep(0.5)
     
-    if done == total:
-        await ctx['pool'].enqueue_job('stitch_video', job_id)
-        logging.info(f"[process_clip] All clips done, enqueuing stitch_video")
+    keywords = ['steve jobs', 'iphone', 'apple', 'launch']
+    has_reference = any(keyword in transcript.lower() for keyword in keywords)
     
-    await redis_client.close()
+    if has_reference:
+        return {
+            'has_reference': True,
+            'image_url': 'https://iyvkdwkdzcridtiioofc.supabase.co/storage/v1/object/public/perplexed/richard%20feynman.png'
+        }
+    
+    return {'has_reference': False}
 
 async def stitch_video(ctx, job_id: str):
     logging.info(f"[stitch_video] Starting job {job_id}")
@@ -157,4 +253,4 @@ class WorkerSettings:
     functions = [split_video, process_clip, stitch_video]
     on_startup = startup
     on_shutdown = shutdown
-    max_jobs = 10
+    max_jobs = 3

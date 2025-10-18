@@ -82,6 +82,7 @@ def create_video_from_image_and_audio(
     """
     Create video from static image and audio file.
     Video duration matches audio duration.
+    Image is scaled to 1280x720 (16:9) to match standard video format.
     Returns path to output video file.
     """
     cmd = [
@@ -89,6 +90,7 @@ def create_video_from_image_and_audio(
         '-loop', '1',
         '-i', image_path,
         '-i', audio_path,
+        '-vf', 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720',
         '-c:v', 'libx264',
         '-tune', 'stillimage',
         '-c:a', 'aac',
