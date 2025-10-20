@@ -20,6 +20,12 @@ class Config:
     # OpenAI config
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
+    # ElevenLabs config
+    ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
+
+    # Perplexity config
+    PERPLEXITY_API_KEY = os.getenv('PERPLEXITY_API_KEY')
+
     # Download directory
     DOWNLOAD_DIR = os.path.join(basedir, os.getenv('DOWNLOAD_DIR', 'runs'))
     REMOTE_DIR = os.getenv('DOWNLOAD_DIR', 'runs')

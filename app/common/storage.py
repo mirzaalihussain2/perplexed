@@ -28,30 +28,26 @@ async def download_from_supabase(
     except Exception as error:
         raise ValueError(f"Failed to download {remote_path} from {bucket}: {error}")
 
-def upload_to_supabase(
-    supabase: Client,
-    bucket: str,
-    local_path: str,
-    remote_path: str,
-    content_type: str = "video/mp4"
-) -> str:
+def upload_to_supabase(supabase_client, bucket: str, local_path: str, remote_path: str, content_type: str = None):
     """
-    Upload local file to Supabase storage
-    Returns: remote path
+    Upload file to Supabase storage.
     """
-    try:
-        with open(local_path, "rb") as f:
-            response = supabase.storage.from_(bucket).upload(
-                file=f,
-                path=remote_path,
-                file_options={
-                    "upsert": "true",
-                    "content-type": content_type
-                }
-            )
-        return response.path
-    except Exception as error:
-        raise ValueError(f"Failed to upload {local_path} to {bucket}/{remote_path}: {error}")
+    import mimetypes
+    
+    with open(local_path, 'rb') as f:
+        file_data = f.read()
+    
+    # Auto-detect content-type if not provided
+    if content_type is None:
+        content_type, _ = mimetypes.guess_type(local_path)
+        if content_type is None:
+            content_type = 'application/octet-stream'
+    
+    supabase_client.storage.from_(bucket).upload(
+        remote_path,
+        file_data,
+        file_options={"content-type": content_type}
+    )
 
 def get_public_url(
     supabase: Client,

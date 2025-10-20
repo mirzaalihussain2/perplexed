@@ -40,7 +40,8 @@ def split_video(
             '-i', video_path,
             '-ss', str(start_time),
             '-t', str(clip_duration),
-            '-c', 'copy',
+            '-c:v', 'libx264',  # Re-encode video instead of copy
+            '-c:a', 'aac',       # Re-encode audio instead of copy
             '-y',
             output_path
         ]

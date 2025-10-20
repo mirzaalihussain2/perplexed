@@ -66,46 +66,36 @@ async def create_job():
 
 @bp.route('/jobs/<job_id>', methods=['GET'])
 async def get_job_status(job_id):
-    try:
-        redis_client = current_app.redis
-        
-        status = await redis_client.get(f"job:{job_id}:status")
-        
-        if not status:
-            response = ApiResponse(
-                success=False,
-                error=ErrorDetail(
-                    code="NOT_FOUND",
-                    message="Job not found or expired"
-                )
-            )
-            return jsonify(response.model_dump()), HTTPStatus.NOT_FOUND
-        
-        total = int(await redis_client.get(f"job:{job_id}:total") or 0)
-        done = int(await redis_client.get(f"job:{job_id}:done") or 0)
-        
-        data = {
-            "job_id": job_id,
-            "status": status,
-            "progress": {
-                "total": total,
-                "done": done
-            }
-        }
-        
-        if status == "finished":
-            data["final_url"] = f"{current_app.config['SUPABASE_URL']}/storage/v1/object/public/{current_app.config['SUPABASE_BUCKET']}/videos/{job_id}/final.mp4"
-        
-        response = ApiResponse(success=True, data=data)
-        return jsonify(response.model_dump()), HTTPStatus.OK
-        
-    except Exception as e:
-        current_app.logger.error(f"Error getting job status: {str(e)}")
-        response = ApiResponse(
+    redis = current_app.redis
+    
+    status = await redis.get(f"job:{job_id}:status")
+    if not status:
+        return jsonify(ApiResponse(
             success=False,
-            error=ErrorDetail(
-                code="INTERNAL_ERROR",
-                message="Failed to retrieve job status"
-            )
-        )
-        return jsonify(response.model_dump()), HTTPStatus.INTERNAL_SERVER_ERROR
+            message="Job not found",
+            error=ErrorDetail(code="NOT_FOUND", message="Job not found")
+        ).model_dump()), HTTPStatus.NOT_FOUND
+    
+    total = await redis.get(f"job:{job_id}:total") or "0"
+    done = await redis.get(f"job:{job_id}:done") or "0"
+    error = await redis.get(f"job:{job_id}:error")
+    final_url = await redis.get(f"job:{job_id}:final_url")
+    
+    response_data = {
+        "job_id": job_id,
+        "status": status,
+        "total": int(total),
+        "done": int(done)
+    }
+    
+    if error:
+        response_data["error"] = error
+    
+    if final_url:
+        response_data["final_url"] = final_url
+    
+    return jsonify(ApiResponse(
+        success=True,
+        message="Job status retrieved",
+        data=response_data
+    ).model_dump()), HTTPStatus.OK
